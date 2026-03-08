@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>flow-tmux</title>
+<style>
+  :root {
+    --bg: #191724; --surface: #1f1d2e; --overlay: #26233a;
+    --muted: #6e6a86; --subtle: #908caa; --text: #e0def4;
+    --love: #eb6f92; --gold: #f6c177; --rose: #ebbcba;
+    --pine: #31748f; --foam: #9ccfd8; --iris: #c4a7e7;
+    --hl-low: #21202e; --hl-med: #403d52; --hl-high: #524f67;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    background: var(--bg); color: var(--text);
+    padding: 16px; max-width: 1100px; margin: 0 auto;
+  }
+  h1 { color: var(--iris); font-size: 1.4em; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+  h2 { color: var(--foam); font-size: 1em; margin: 20px 0 8px; }
+  .tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid var(--overlay); }
+  .tab {
+    padding: 8px 20px; cursor: pointer; color: var(--muted); font-size: 0.9em;
+    border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--iris); border-bottom-color: var(--iris); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .card { background: var(--surface); border-radius: 8px; padding: 16px; border: 1px solid var(--overlay); }
+  .card-label { color: var(--muted); font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.1em; }
+  .card-value { font-size: 1.8em; font-weight: bold; margin-top: 4px; }
+  .card-sub { color: var(--subtle); font-size: 0.8em; margin-top: 2px; }
+
+  /* Timer */
+  #timer-card { border-color: var(--love); }
+  #timer-card.idle { border-color: var(--overlay); opacity: 0.6; }
+  #timer-card.work .card-value { color: var(--love); }
+  #timer-card.break .card-value { color: var(--pine); }
+  #timer-card.paused .card-value { color: var(--gold); }
+  .progress-wrap { background: var(--overlay); border-radius: 4px; height: 6px; margin-top: 8px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 4px; transition: width 1s linear; }
+  .progress-fill.work { background: var(--love); }
+  .progress-fill.break { background: var(--pine); }
+
+  /* ── Kanban Board ── */
+  .kanban { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .kanban { grid-template-columns: 1fr; } }
+  .kanban-col {
+    background: var(--surface); border-radius: 8px; padding: 12px;
+    border: 1px solid var(--overlay); min-height: 200px;
+  }
+  .kanban-col-header {
+    font-size: 0.8em; font-weight: bold; margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .kanban-col-header .count { color: var(--muted); font-weight: normal; }
+  .col-in_progress .kanban-col-header { color: var(--love); }
+  .col-todo .kanban-col-header { color: var(--foam); }
+  .col-done .kanban-col-header { color: var(--muted); }
+  .kanban-col.drag-over { border-color: var(--iris); background: var(--hl-low); }
+
+  /* Task card */
+  .task-card {
+    background: var(--overlay); border-radius: 6px; padding: 10px 12px;
+    margin-bottom: 8px; cursor: grab; transition: all 0.15s;
+    border-left: 3px solid var(--hl-high); position: relative;
+  }
+  .task-card:hover { background: var(--hl-med); }
+  .task-card.dragging { opacity: 0.4; }
+  .task-card.in_progress { border-left-color: var(--love); }
+  .task-card.todo { border-left-color: var(--foam); }
+  .task-card.done { border-left-color: var(--muted); opacity: 0.6; }
+  .task-card .task-id { color: var(--muted); font-size: 0.7em; }
+  .task-card .task-title {
+    font-size: 0.85em; margin-top: 2px; outline: none;
+    min-height: 1.2em; word-break: break-word;
+  }
+  .task-card .task-title:focus {
+    background: var(--surface); border-radius: 3px; padding: 2px 4px; margin: -2px -4px;
+  }
+  .task-meta { display: flex; gap: 8px; margin-top: 6px; align-items: center; flex-wrap: wrap; }
+  .task-meta > * { font-size: 0.7em; }
+  .badge {
+    padding: 1px 6px; border-radius: 3px; cursor: pointer; user-select: none;
+  }
+  .badge-priority { background: var(--hl-med); color: var(--subtle); }
+  .badge-priority.high { background: rgba(235,111,146,0.2); color: var(--love); }
+  .badge-priority.low { background: rgba(110,106,134,0.2); color: var(--muted); }
+  .badge-pomo { background: rgba(156,207,216,0.15); color: var(--foam); }
+  .badge-recurring { background: rgba(196,167,231,0.15); color: var(--iris); }
+  .task-actions {
+    position: absolute; top: 6px; right: 8px;
+    display: none; gap: 4px;
+  }
+  .task-card:hover .task-actions { display: flex; }
+  .task-btn {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 0.8em; padding: 2px 4px; border-radius: 3px;
+  }
+  .task-btn:hover { background: var(--hl-med); color: var(--text); }
+  .task-btn.delete:hover { color: var(--love); }
+
+  /* Subtasks */
+  .subtask-list { margin-top: 6px; padding-left: 4px; }
+  .subtask-item {
+    display: flex; align-items: center; gap: 6px; font-size: 0.75em;
+    color: var(--subtle); padding: 2px 0; cursor: pointer;
+  }
+  .subtask-item.done { text-decoration: line-through; color: var(--muted); }
+  .subtask-check { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid var(--hl-high); display: inline-flex; align-items: center; justify-content: center; font-size: 0.6em; flex-shrink: 0; }
+  .subtask-item.done .subtask-check { border-color: var(--pine); color: var(--pine); }
+  .add-subtask-btn { font-size: 0.7em; color: var(--muted); cursor: pointer; margin-top: 4px; }
+  .add-subtask-btn:hover { color: var(--foam); }
+
+  /* Add task form */
+  .add-task-form {
+    display: flex; gap: 8px; margin-bottom: 12px; align-items: center;
+  }
+  .add-task-form input {
+    flex: 1; background: var(--overlay); border: 1px solid var(--hl-high);
+    color: var(--text); padding: 8px 12px; border-radius: 6px; font-family: inherit;
+    font-size: 0.85em; outline: none;
+  }
+  .add-task-form input:focus { border-color: var(--iris); }
+  .add-task-form input::placeholder { color: var(--muted); }
+  .add-task-form select {
+    background: var(--overlay); border: 1px solid var(--hl-high); color: var(--text);
+    padding: 8px; border-radius: 6px; font-family: inherit; font-size: 0.85em;
+  }
+  .btn {
+    background: var(--iris); color: var(--bg); border: none; padding: 8px 16px;
+    border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 0.85em;
+    font-weight: bold;
+  }
+  .btn:hover { opacity: 0.9; }
+
+  /* Charts */
+  .bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 100px; margin-top: 8px; }
+  .bar-col { display: flex; flex-direction: column; align-items: center; flex: 1; }
+  .bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; background: var(--love); }
+  .bar-label { font-size: 0.6em; color: var(--muted); margin-top: 4px; }
+  .bar-val { font-size: 0.65em; color: var(--subtle); margin-bottom: 2px; }
+  .hourly-chart { display: flex; align-items: flex-end; gap: 2px; height: 60px; margin-top: 8px; }
+  .hourly-bar { flex: 1; border-radius: 2px 2px 0 0; background: var(--iris); min-height: 1px; opacity: 0.8; }
+  .heatmap { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-top: 8px; }
+  .heat-cell {
+    aspect-ratio: 1; border-radius: 3px; background: var(--overlay);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.55em; color: var(--muted);
+  }
+  .heat-cell.l1 { background: var(--hl-med); }
+  .heat-cell.l2 { background: var(--pine); color: var(--text); }
+  .heat-cell.l3 { background: var(--love); color: var(--text); }
+
+  .session-item {
+    padding: 4px 8px; font-size: 0.8em; color: var(--subtle);
+    border-bottom: 1px solid var(--overlay);
+    display: flex; justify-content: space-between;
+  }
+  .type-work { color: var(--love); }
+  .type-break { color: var(--pine); }
+  .distraction-item { padding: 4px 8px; font-size: 0.8em; color: var(--gold); border-bottom: 1px solid var(--overlay); }
+  .streak-badge { color: var(--gold); }
+  .footer { text-align: center; color: var(--muted); font-size: 0.7em; margin-top: 24px; padding: 16px; }
+  .empty { color: var(--muted); font-size: 0.8em; padding: 16px; text-align: center; }
+
+  /* Project cards */
+  .project-card {
+    background: var(--surface); border-radius: 8px; padding: 16px;
+    border: 1px solid var(--overlay); margin-bottom: 12px;
+  }
+  .project-card h3 { color: var(--iris); font-size: 1em; margin-bottom: 8px; }
+  .project-windows { display: flex; flex-wrap: wrap; gap: 6px; }
+  .project-win {
+    background: var(--overlay); border-radius: 4px; padding: 4px 10px;
+    font-size: 0.75em; color: var(--foam);
+  }
+  .project-win .win-cmd { color: var(--muted); margin-left: 6px; }
+
+  /* Notification items */
+  .notif-item {
+    padding: 6px 8px; font-size: 0.8em; color: var(--subtle);
+    border-bottom: 1px solid var(--overlay);
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+  .notif-item .notif-type { color: var(--foam); min-width: 50px; }
+  .notif-item .notif-msg { flex: 1; }
+  .notif-item .notif-time { color: var(--muted); white-space: nowrap; }
+  @media (max-width: 600px) {
+    .grid { grid-template-columns: 1fr 1fr; }
+    body { padding: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>󱎫 flow-tmux</h1>
+
+<!-- Timer -->
+<div class="card" id="timer-card">
+  <div class="card-label">Current Timer</div>
+  <div class="card-value" id="timer-value">idle</div>
+  <div class="card-sub" id="timer-goal"></div>
+  <div class="progress-wrap"><div class="progress-fill" id="timer-progress"></div></div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs" style="margin-top: 16px;">
+  <div class="tab active" data-tab="tasks">Tasks</div>
+  <div class="tab" data-tab="stats">Stats</div>
+  <div class="tab" data-tab="sessions">Sessions</div>
+  <div class="tab" data-tab="projects">Projects</div>
+  <div class="tab" data-tab="notifications">Notifications</div>
+</div>
+
+<!-- ═══ Tasks Tab ═══ -->
+<div class="tab-content active" id="tab-tasks">
+  <!-- Add task form -->
+  <div class="add-task-form">
+    <input type="text" id="new-task-input" placeholder="New task... (prefix ! for high, ~ for low priority)" />
+    <select id="new-task-priority">
+      <option value="-">Normal</option>
+      <option value="!">! High</option>
+      <option value="~">~ Low</option>
+    </select>
+    <label style="font-size:0.8em;color:var(--muted);display:flex;align-items:center;gap:4px;">
+      <input type="checkbox" id="new-task-recurring" /> Daily
+    </label>
+    <button class="btn" onclick="handleAddTask()">Add</button>
+  </div>
+
+  <!-- Kanban board -->
+  <div class="kanban">
+    <div class="kanban-col col-in_progress" data-status="in_progress"
+         ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'in_progress')">
+      <div class="kanban-col-header">
+        <span>󰈸 In Progress</span>
+        <span class="count" id="count-in_progress">0</span>
+      </div>
+      <div id="col-in_progress"></div>
+    </div>
+    <div class="kanban-col col-todo" data-status="todo"
+         ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'todo')">
+      <div class="kanban-col-header">
+        <span>󰃨 Todo</span>
+        <span class="count" id="count-todo">0</span>
+      </div>
+      <div id="col-todo"></div>
+    </div>
+    <div class="kanban-col col-done" data-status="done"
+         ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'done')">
+      <div class="kanban-col-header">
+        <span>󰄬 Done</span>
+        <span class="count" id="count-done">0</span>
+      </div>
+      <div id="col-done"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Stats Tab ═══ -->
+<div class="tab-content" id="tab-stats">
+  <div class="grid">
+    <div class="card">
+      <div class="card-label">Today</div>
+      <div class="card-value" id="today-count">0</div>
+      <div class="card-sub" id="today-time">0m</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total</div>
+      <div class="card-value" id="total-count">0</div>
+      <div class="card-sub" id="total-time">0m</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Streak</div>
+      <div class="card-value streak-badge" id="streak-val">0d</div>
+      <div class="card-sub">consecutive days</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Avg / Day</div>
+      <div class="card-value" id="avg-val">0</div>
+      <div class="card-sub">sessions</div>
+    </div>
+  </div>
+  <h2>Last 14 Days</h2>
+  <div class="card"><div class="bar-chart" id="daily-chart"></div></div>
+  <h2>Hourly Distribution</h2>
+  <div class="card"><div class="hourly-chart" id="hourly-chart"></div></div>
+  <h2>4-Week Heatmap</h2>
+  <div class="card"><div class="heatmap" id="heatmap"></div></div>
+</div>
+
+<!-- ═══ Sessions Tab ═══ -->
+<div class="tab-content" id="tab-sessions">
+  <h2>Recent Sessions</h2>
+  <div class="card"><div id="session-list"></div></div>
+  <h2>Today's Distractions</h2>
+  <div class="card"><div id="distraction-list"></div></div>
+</div>
+
+<!-- ═══ Projects Tab ═══ -->
+<div class="tab-content" id="tab-projects">
+  <h2>Project Templates</h2>
+  <div id="project-list"></div>
+  <div class="empty" id="project-empty" style="display:none">No projects configured. Create <code>~/.cache/flow-tmux/projects.conf</code></div>
+</div>
+
+<!-- ═══ Notifications Tab ═══ -->
+<div class="tab-content" id="tab-notifications">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <h2 style="margin:0">Notification Log</h2>
+    <button class="btn" onclick="handleClearNotifications()" style="font-size:0.75em;padding:6px 12px;">Clear All</button>
+  </div>
+  <div class="card"><div id="notification-list"></div></div>
+</div>
+
+<div class="footer">auto-refreshes every 2s · drag tasks between columns · click title to edit</div>
+
+<script>
+const API = window.location.origin;
+let allTasks = [];
+let allSubtasks = [];
+let timerState = null;
+let draggedTaskId = null;
+
+// ── Tabs ──
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Helpers ──
+function formatMin(m) {
+  const h = Math.floor(m / 60);
+  return h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
+}
+function formatTimer(seconds) {
+  if (seconds < 0) seconds = 0;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+// ── Timer ──
+function updateTimer() {
+  const el = document.getElementById('timer-card');
+  const val = document.getElementById('timer-value');
+  const goal = document.getElementById('timer-goal');
+  const prog = document.getElementById('timer-progress');
+  if (!timerState) return;
+  const { status, startTime, timePaused, pausedAt, phaseBefore, goal: g } = timerState;
+  el.className = `card ${status}`;
+  if (status === 'idle') { val.textContent = 'idle'; goal.textContent = ''; prog.style.width = '0%'; return; }
+  const phase = status === 'paused' ? (phaseBefore || 'work') : status;
+  const duration = phase === 'work' ? 25*60 : 5*60;
+  const now = Math.floor(Date.now() / 1000);
+  const elapsed = status === 'paused' ? pausedAt - startTime - timePaused : now - startTime - timePaused;
+  const remaining = Math.max(0, duration - elapsed);
+  const pct = Math.min(100, (elapsed / duration) * 100);
+  const icon = status === 'paused' ? '󰏤' : phase === 'work' ? '󱎫' : '󰅶';
+  val.textContent = `${icon} ${formatTimer(remaining)}`;
+  goal.textContent = g ? `󰀘 ${g}` : '';
+  prog.style.width = `${pct}%`;
+  prog.className = `progress-fill ${phase}`;
+}
+
+// ── API helpers ──
+async function apiPost(path, body) {
+  const res = await fetch(API + path, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  return res.json();
+}
+async function apiPut(path, body) {
+  const res = await fetch(API + path, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  return res.json();
+}
+async function apiDelete(path) {
+  await fetch(API + path, { method: 'DELETE' });
+}
+
+// ── Add task ──
+async function handleAddTask() {
+  const input = document.getElementById('new-task-input');
+  const priority = document.getElementById('new-task-priority').value;
+  const recurring = document.getElementById('new-task-recurring').checked ? 'daily' : '';
+  let title = input.value.trim();
+  if (!title) return;
+  // Parse priority prefix
+  let p = priority;
+  if (title.startsWith('!')) { p = '!'; title = title.slice(1).trim(); }
+  else if (title.startsWith('~')) { p = '~'; title = title.slice(1).trim(); }
+  await apiPost('/api/tasks', { title, priority: p, recurring });
+  input.value = '';
+  document.getElementById('new-task-priority').value = '-';
+  document.getElementById('new-task-recurring').checked = false;
+  await refreshTasks();
+}
+document.getElementById('new-task-input').addEventListener('keydown', e => { if (e.key === 'Enter') handleAddTask(); });
+
+// ── Drag & drop ──
+function handleDragStart(e, taskId) {
+  draggedTaskId = taskId;
+  e.target.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+function handleDragEnd(e) {
+  e.target.classList.remove('dragging');
+  document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drag-over'));
+}
+function handleDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+function handleDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+async function handleDrop(e, newStatus) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (draggedTaskId === null) return;
+  await apiPut(`/api/tasks/${draggedTaskId}`, { status: newStatus });
+  draggedTaskId = null;
+  await refreshTasks();
+}
+
+// ── Edit title inline ──
+let editTimeout = null;
+function handleTitleBlur(taskId, el) {
+  clearTimeout(editTimeout);
+  editTimeout = setTimeout(async () => {
+    const newTitle = el.textContent.trim();
+    if (newTitle) {
+      await apiPut(`/api/tasks/${taskId}`, { title: newTitle });
+    }
+  }, 200);
+}
+
+// ── Cycle priority ──
+async function cyclePriority(taskId) {
+  const task = allTasks.find(t => t.id === taskId);
+  if (!task) return;
+  const order = ['-', '!', '~'];
+  const next = order[(order.indexOf(task.priority) + 1) % order.length];
+  await apiPut(`/api/tasks/${taskId}`, { priority: next });
+  await refreshTasks();
+}
+
+// ── Delete task ──
+async function handleDeleteTask(taskId) {
+  await apiDelete(`/api/tasks/${taskId}`);
+  await refreshTasks();
+}
+
+// ── Subtasks ──
+async function toggleSubtask(parentId, subId, currentStatus) {
+  const newStatus = currentStatus === 'done' ? 'todo' : 'done';
+  await apiPut(`/api/tasks/${parentId}/subtasks/${subId}`, { status: newStatus });
+  await refreshTasks();
+}
+
+async function promptAddSubtask(parentId) {
+  const title = prompt('Subtask title:');
+  if (!title) return;
+  await apiPost(`/api/tasks/${parentId}/subtasks`, { title });
+  await refreshTasks();
+}
+
+async function handleDeleteSubtask(parentId, subId) {
+  await apiDelete(`/api/tasks/${parentId}/subtasks/${subId}`);
+  await refreshTasks();
+}
+
+// ── Render tasks ──
+function renderTasks() {
+  const cols = { in_progress: [], todo: [], done: [] };
+  const priorityOrder = { '!': 0, '-': 1, '~': 2 };
+
+  for (const t of allTasks) {
+    const col = cols[t.status] || cols.todo;
+    col.push(t);
+  }
+  // Sort todo by priority
+  cols.todo.sort((a, b) => (priorityOrder[a.priority]||1) - (priorityOrder[b.priority]||1));
+
+  for (const [status, tasks] of Object.entries(cols)) {
+    const container = document.getElementById('col-' + status);
+    document.getElementById('count-' + status).textContent = tasks.length;
+
+    container.innerHTML = tasks.map(t => {
+      const pClass = t.priority === '!' ? 'high' : t.priority === '~' ? 'low' : '';
+      const pLabel = t.priority === '!' ? '!' : t.priority === '~' ? '~' : '-';
+      const pomoHtml = t.pomodoros > 0 ? `<span class="badge badge-pomo">${t.pomodoros}x</span>` : '';
+      const recurHtml = t.recurring ? `<span class="badge badge-recurring">󰑖 daily</span>` : '';
+
+      // Subtasks
+      const subs = allSubtasks.filter(s => s.parentId === t.id);
+      let subsHtml = '';
+      if (subs.length > 0) {
+        subsHtml = '<div class="subtask-list">' + subs.map(s =>
+          `<div class="subtask-item ${s.status}" onclick="toggleSubtask(${s.parentId},${s.subId},'${s.status}')">
+            <span class="subtask-check">${s.status === 'done' ? '✓' : ''}</span>
+            <span>${s.title}</span>
+            <span class="task-btn delete" onclick="event.stopPropagation();handleDeleteSubtask(${s.parentId},${s.subId})" style="margin-left:auto">×</span>
+          </div>`
+        ).join('') + '</div>';
+      }
+      subsHtml += `<div class="add-subtask-btn" onclick="promptAddSubtask(${t.id})">+ subtask</div>`;
+
+      return `<div class="task-card ${t.status}" draggable="true"
+                   ondragstart="handleDragStart(event, ${t.id})" ondragend="handleDragEnd(event)"
+                   data-id="${t.id}">
+        <div class="task-actions">
+          <button class="task-btn delete" onclick="handleDeleteTask(${t.id})" title="Delete">×</button>
+        </div>
+        <div class="task-id">#${t.id}</div>
+        <div class="task-title" contenteditable="true"
+             onblur="handleTitleBlur(${t.id}, this)"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}">${t.title}</div>
+        <div class="task-meta">
+          <span class="badge badge-priority ${pClass}" onclick="cyclePriority(${t.id})" title="Click to cycle priority">${pLabel}</span>
+          ${pomoHtml}${recurHtml}
+        </div>
+        ${subsHtml}
+      </div>`;
+    }).join('') || '<div class="empty">No tasks</div>';
+  }
+}
+
+// ── Refresh data ──
+async function refreshTasks() {
+  try {
+    const res = await fetch(API + '/api/tasks');
+    const data = await res.json();
+    allTasks = data.tasks || [];
+    allSubtasks = data.subtasks || [];
+    renderTasks();
+  } catch(e) {}
+}
+
+async function refresh() {
+  try {
+    const res = await fetch(API + '/api/all');
+    const data = await res.json();
+    timerState = data.timer;
+    allTasks = data.tasks || [];
+    allSubtasks = data.subtasks || [];
+
+    renderTasks();
+
+    // Stats
+    document.getElementById('today-count').textContent = data.stats.today.count;
+    document.getElementById('today-time').textContent = formatMin(data.stats.today.minutes);
+    document.getElementById('total-count').textContent = data.stats.total.count;
+    document.getElementById('total-time').textContent = formatMin(data.stats.total.minutes);
+    document.getElementById('streak-val').textContent = `${data.stats.streak}d`;
+    const activeDays = data.stats.daily.filter(d => d.count > 0).length || 1;
+    document.getElementById('avg-val').textContent = (data.stats.daily.reduce((a,d) => a+d.count, 0) / Math.min(14, activeDays)).toFixed(1);
+
+    // Daily chart
+    const maxD = Math.max(...data.stats.daily.map(d => d.count), 1);
+    document.getElementById('daily-chart').innerHTML = data.stats.daily.map(d => {
+      const h = Math.max(2, (d.count / maxD) * 90);
+      return `<div class="bar-col"><div class="bar-val">${d.count||''}</div><div class="bar" style="height:${h}%"></div><div class="bar-label">${d.date.slice(5)}</div></div>`;
+    }).join('');
+
+    // Hourly
+    const maxH = Math.max(...data.stats.hourly, 1);
+    document.getElementById('hourly-chart').innerHTML = data.stats.hourly.map((c,i) =>
+      `<div class="hourly-bar" style="height:${Math.max(1,(c/maxH)*100)}%" title="${i}:00 — ${c}"></div>`
+    ).join('');
+
+    // Heatmap
+    document.getElementById('heatmap').innerHTML = data.stats.heatmap.map(h => {
+      const lvl = h.count===0 ? '' : h.count<3 ? 'l1' : h.count<6 ? 'l2' : 'l3';
+      return `<div class="heat-cell ${lvl}" title="${h.date}: ${h.count}">${h.date.slice(8)}</div>`;
+    }).join('');
+
+    // Sessions
+    document.getElementById('session-list').innerHTML = data.stats.recentSessions.map(s => {
+      const time = s.timestamp.split('T')[1]?.slice(0,5)||'';
+      const date = s.timestamp.split('T')[0]?.slice(5)||'';
+      return `<div class="session-item"><span class="type-${s.type}">${s.type==='work'?'󱎫':'󰅶'} ${s.type}</span><span>${s.goal||''}</span><span>${date} ${time} · ${s.duration}m</span></div>`;
+    }).join('') || '<div class="empty">No sessions yet</div>';
+
+    // Distractions
+    const today = new Date().toISOString().slice(0,10);
+    const todayD = (data.distractions||[]).filter(d => d.timestamp?.startsWith(today));
+    document.getElementById('distraction-list').innerHTML = todayD.map(d =>
+      `<div class="distraction-item">${d.timestamp?.split('T')[1]?.slice(0,5)||''} · ${d.message}</div>`
+    ).join('') || '<div class="empty">None today</div>';
+
+    // Projects & Notifications
+    renderProjects(data.projects || []);
+    renderNotifications(data.notifications || []);
+  } catch(e) { console.error(e); }
+}
+
+// ── Render projects ──
+function renderProjects(projects) {
+  const container = document.getElementById('project-list');
+  const empty = document.getElementById('project-empty');
+  if (!projects || projects.length === 0) {
+    container.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  container.innerHTML = projects.map(p => {
+    const wins = p.windows.map(w =>
+      `<span class="project-win">${w.name}<span class="win-cmd">${w.cmd || ''}</span></span>`
+    ).join('');
+    return `<div class="project-card"><h3>󰝰 ${p.name}</h3><div class="project-windows">${wins}</div></div>`;
+  }).join('');
+}
+
+// ── Render notifications ──
+function renderNotifications(notifications) {
+  const container = document.getElementById('notification-list');
+  if (!notifications || notifications.length === 0) {
+    container.innerHTML = '<div class="empty">No notifications</div>';
+    return;
+  }
+  // Show most recent first
+  const items = notifications.slice().reverse().slice(0, 50);
+  container.innerHTML = items.map(n => {
+    const time = n.timestamp?.split('T')[1]?.slice(0,5) || '';
+    const date = n.timestamp?.split('T')[0]?.slice(5) || '';
+    return `<div class="notif-item"><span class="notif-type">${n.type}</span><span class="notif-msg">${n.message}</span><span class="notif-time">${date} ${time}</span></div>`;
+  }).join('');
+}
+
+async function handleClearNotifications() {
+  await apiDelete('/api/notifications');
+  renderNotifications([]);
+}
+
+setInterval(updateTimer, 1000);
+setInterval(refresh, 2000);
+refresh();
+</script>
+</body>
+</html>
