@@ -11,7 +11,7 @@ set -g @plugin 'user/flow-tmux'
 
 **Manual:**
 ```bash
-git clone https://github.com/user/flow-tmux ~/.tmux/plugins/flow-tmux
+git clone https://github.com/thanhphuchuynh/flow-tmux ~/.tmux/plugins/flow-tmux
 # Add to .tmux.conf:
 run '~/.tmux/plugins/flow-tmux/flow-tmux.tmux'
 ```
