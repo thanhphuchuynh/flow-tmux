@@ -52,6 +52,11 @@ setup_keybindings() {
         tmux bind-key "$distraction_key" run-shell "$SCRIPTS_DIR/distraction.sh prompt"
     fi
 
+    # System monitor
+    local sysmon_key
+    sysmon_key=$(get_tmux_option "@flow_sysmon_key" "S")
+    tmux bind-key "$sysmon_key" run-shell "$SCRIPTS_DIR/sysmon.sh menu"
+
     # Window groups
     local groups_key
     groups_key=$(get_tmux_option "@flow_groups_key" "G")

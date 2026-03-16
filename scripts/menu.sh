@@ -83,6 +83,11 @@ show_menu() {
         menu_items+=("󰂚 Clear All"        "X" "run-shell '$notif_cmd clear'")
     fi
 
+    # System monitor
+    local sysmon_cmd="$CURRENT_DIR/sysmon.sh"
+    menu_items+=(""                    ""  "")
+    menu_items+=(" System Monitor"    "S" "run-shell '$sysmon_cmd menu'")
+
     # Dashboard
     local dash_cmd="$CURRENT_DIR/dashboard.sh"
     menu_items+=(""                    ""  "")
