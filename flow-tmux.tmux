@@ -65,6 +65,9 @@ setup_keybindings() {
     tmux bind-key C-n run-shell "$SCRIPTS_DIR/groups.sh next"
     tmux bind-key C-p run-shell "$SCRIPTS_DIR/groups.sh prev"
 
+    # Pane list: Q = list panes in current window
+    tmux bind-key Q run-shell "$SCRIPTS_DIR/panepicker.sh"
+
     # Window picker: w = current session only, W = all sessions
     tmux bind-key w run-shell "$SCRIPTS_DIR/winpicker.sh"
     tmux bind-key W choose-tree -Z
